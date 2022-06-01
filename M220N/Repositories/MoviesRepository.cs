@@ -114,15 +114,14 @@ namespace M220N.Repositories
             params string[] countries
             )
         {
-            // TODO Ticket: Projection - Search for movies by ``country`` and use projection to
-            // return only the ``Id`` and ``Title`` fields
-            //
-            //return await _moviesCollection
-            //   .Find(...)
-            //   .Project(...)
-            //   .ToListAsync(cancellationToken);
+            var match = new BsonDocument("countries", new BsonDocument("$in", new BsonArray(countries)));
+            var project = new BsonDocument { { "_id", 1 }, { "title", 1 } };
 
-            return null;
+            return await _moviesCollection.Aggregate()
+                .Match(match)
+                .Project<MovieByCountryProjection>(project)
+                .SortByDescending(m => m.Title)
+                .ToListAsync(cancellationToken);
         }
 
         /// <summary>
