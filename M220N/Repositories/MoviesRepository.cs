@@ -33,7 +33,7 @@ namespace M220N.Repositories
         public MoviesRepository(IMongoClient mongoClient)
         {
             _mongoClient = mongoClient;
-            var camelCaseConvention = new ConventionPack {new CamelCaseElementNameConvention()};
+            var camelCaseConvention = new ConventionPack { new CamelCaseElementNameConvention() };
             ConventionRegistry.Register("CamelCase", camelCaseConvention, type => true);
 
             _moviesCollection = mongoClient.GetDatabase("sample_mflix").GetCollection<Movie>("movies");
@@ -59,7 +59,7 @@ namespace M220N.Repositories
             string sort = DefaultSortKey, int sortDirection = DefaultSortOrder,
             CancellationToken cancellationToken = default)
         {
-            var skip =  moviesPerPage * page;
+            var skip = moviesPerPage * page;
             var limit = moviesPerPage;
 
 
@@ -114,11 +114,10 @@ namespace M220N.Repositories
             params string[] countries
             )
         {
-            var match = new BsonDocument("countries", new BsonDocument("$in", new BsonArray(countries)));
             var project = new BsonDocument { { "_id", 1 }, { "title", 1 } };
 
-            return await _moviesCollection.Aggregate()
-                .Match(match)
+            return await _moviesCollection
+                .Find(Builders<Movie>.Filter.In("countries", countries))
                 .Project<MovieByCountryProjection>(project)
                 .SortByDescending(m => m.Title)
                 .ToListAsync(cancellationToken);
@@ -186,23 +185,14 @@ namespace M220N.Repositories
             string sortKey = DefaultSortKey, int limit = DefaultMoviesPerPage,
             int page = 0, params string[] genres)
         {
-            var returnValue = new List<Movie>();
-
             var sort = new BsonDocument(sortKey, DefaultSortOrder);
 
-            // TODO Ticket: Enable filtering of movies by genre.
-            // If you get stuck see the ``GetMoviesByCastAsync`` method above.
-            /*return await _moviesCollection
-               .Find(...)
-               .ToListAsync(cancellationToken);*/
-
-            // // TODO Ticket: Paging
-            // TODO Ticket: Paging
-            // Modify the code you added in the Text and Subfield ticket to
-            // include pagination. Refer to the other methods in this class
-            // if you need a hint.
-
-            return returnValue;
+            return await _moviesCollection
+                .Find(Builders<Movie>.Filter.In("genres", genres))
+                .Limit(limit)
+                .Skip(page * limit)
+                .Sort(sort)
+                .ToListAsync(cancellationToken);
         }
 
         /// <summary>
@@ -215,52 +205,35 @@ namespace M220N.Repositories
         public async Task<MoviesByCastProjection> GetMoviesCastFacetedAsync(string cast, int page = 0,
             CancellationToken cancellationToken = default)
         {
-            /*
-               TODO Ticket: Faceted Search
-
-               We have already built the pipeline stages you need to perform a
-               faceted search on the Movies collection. Your task is to append the
-               facetStage, skipStage, and limitStage pipeline stages to the pipeline.
-               Think carefully about the order that these stages should be executed!
-           */
-
-            // I match movies by cast members
             var matchStage = new BsonDocument("$match",
                 new BsonDocument("cast",
                     new BsonDocument("$in",
-                        new BsonArray {cast})));
+                        new BsonArray { cast })));
 
-            //I limit the number of results
             var limitStage = new BsonDocument("$limit", DefaultMoviesPerPage);
 
-            //I sort the results by the number of reviewers, descending
             var sortStage = new BsonDocument("$sort",
                 new BsonDocument("tomatoes.viewer.numReviews", -1));
 
-            // In conjunction with limitStage, I enable pagination
             var skipStage = new BsonDocument("$skip", DefaultMoviesPerPage * page);
 
-            // I build the facets
             var facetStage = BuildFacetStage();
 
-            // I am the pipeline that runs all of the stages
             var pipeline = new[]
             {
                 matchStage,
                 sortStage,
-                // add the remaining stages in the correct order
-
+                skipStage,
+                limitStage,
+                facetStage,
             };
 
-            // I run the pipeline you built
             var result = await _moviesCollection
                 .Aggregate(PipelineDefinition<Movie, MoviesByCastProjection>.Create(pipeline))
                 .FirstOrDefaultAsync(cancellationToken);
 
-            // We build another pipeline here to count the number of
-            // movies that match _without_ the limit, skip, and facet stages
             var count = BuildAndRunCountPipeline(matchStage, sortStage);
-            result.Count = (int) count.Values.First();
+            result.Count = (int)count.Values?.First();
 
             return result;
         }
